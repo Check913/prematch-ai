@@ -189,11 +189,9 @@ def cmd_cycle(args) -> int:
             "quiet_hours", [1, 7])]
         hour = __import__("time").localtime().tm_hour
         in_quiet = quiet[0] <= hour < quiet[1]
-        result = pipeline.predict(store=True)
-        if result["picks"] and not in_quiet:
-            bot.send_digest()
-            sent = f"digest ({len(result['picks'])} picks)"
-        elif not in_quiet:
+        # Les digests reguliers viennent du bot local (PC) : ici on ne
+        # fait qu'ALERTER sur value forte, pour eviter les doublons.
+        if not in_quiet:
             bot.alert_new_value()
             sent = "alertes de value (si edge>=2x le seuil)"
     except Exception as exc:
@@ -201,6 +199,16 @@ def cmd_cycle(args) -> int:
     print(f"envoi : {sent}")
     print(json.dumps({k: outcome.get(k) for k in ("settled", "retrained", "promoted")},
                      default=str))
+    return 0
+
+
+def cmd_syncctl(args) -> int:
+    """Applique control.json (publie par les boutons Telegram) a la base."""
+    _, pipeline = _pipeline(args)
+    pipeline.apply_control_file()
+    print("control.json applique : "
+          f"pause={pipeline.db.get_meta('notifications_paused') == '1'} "
+          f"| min_edge={pipeline.min_edge_override() or 'config'}")
     return 0
 
 
@@ -249,7 +257,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="sante du systeme")
     sub.add_parser("bot", help="demarre le bot Telegram")
     sub.add_parser("cycle", help="un cycle unique (reglement + apprentissage "
-                                   "+ digest) - pense pour cron/GitHub Actions")
+                                   "+ alertes) - pense pour cron/GitHub Actions")
+    sub.add_parser("syncctl", help="applique control.json (reglages Telegram "
+                                   "publies) dans la base locale")
 
     return parser
 
@@ -262,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         "ingest-fixtures": cmd_ingest_fixtures, "train": cmd_train,
         "backtest": cmd_backtest, "today": cmd_today, "show": cmd_show,
         "status": cmd_status, "bot": cmd_bot, "digest": cmd_digest,
-        "cycle": cmd_cycle,
+        "cycle": cmd_cycle, "syncctl": cmd_syncctl,
     }
     handler = commands[args.command]
     try:

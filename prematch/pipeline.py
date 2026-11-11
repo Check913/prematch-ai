@@ -42,6 +42,15 @@ class Pipeline:
         self.cfg = cfg
         cfg.ensure_dirs()
         self.db = db or Database(cfg.db_path)
+        # Un reglage d'edge fait depuis Telegram prime sur la config :
+        # c'est une decision explicite de l'utilisateur, persistee en base.
+        self.apply_edge_override()
+        # Les boutons Telegram publient control.json dans le depot : on
+        # l'applique au demarrage (utile pour les cycles GitHub Actions).
+        try:
+            self.apply_control_file()
+        except Exception:  # pragma: no cover - jamais bloquant
+            LOGGER.exception("control.json : echec d'application")
         scraping = cfg.section("scraping")
         self.client = client or PoliteClient(
             cache_dir=cfg.cache_dir,
@@ -142,6 +151,55 @@ class Pipeline:
             return {}
         return {row["key"]: f"{row['date']}T{row.get('time') or '12:00'}"
                 for row in fixtures.to_dict("records")}
+
+    def apply_edge_override(self) -> None:
+        """Applique le seuil d'edge defini a distance (Telegram), s'il existe."""
+        override = self.db.get_meta("min_edge_override")
+        if override is None:
+            return
+        try:
+            self.cfg.data.setdefault("app", {})["min_edge"] = float(override)
+        except (TypeError, ValueError):
+            LOGGER.warning("override min_edge invalide : %r", override)
+
+    def min_edge_override(self) -> float | None:
+        value = self.db.get_meta("min_edge_override")
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def apply_control_file(self) -> None:
+        """Applique control.json (publie par le bot Telegram) si plus recent.
+
+        Permet aux reglages faits sur le PC (pause, seuil d'edge) de
+        suivre les cycles GitHub Actions quand le PC est eteint.
+        """
+        import json as _json
+        path = Path(__file__).resolve().parents[1] / "control.json"
+        if not path.exists():
+            return
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            LOGGER.warning("control.json illisible")
+            return
+        applied_at = str(self.db.get_meta("control_applied_at") or "")
+        stamp = str(data.get("at", ""))
+        if stamp and stamp <= applied_at:
+            return
+        if "paused" in data:
+            self.db.set_meta("notifications_paused",
+                             "1" if data["paused"] else "0")
+        if data.get("min_edge") is not None:
+            try:
+                value = float(data["min_edge"])
+                self.db.set_meta("min_edge_override", value)
+                self.cfg.data.setdefault("app", {})["min_edge"] = value
+            except (TypeError, ValueError):
+                LOGGER.warning("min_edge de control.json invalide")
+        self.db.set_meta("control_applied_at", stamp)
+        LOGGER.info("control.json applique : %s", data)
 
     def predict(self, days_ahead: int = 3, store: bool = True
                 ) -> dict[str, Any]:
