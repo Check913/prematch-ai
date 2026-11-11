@@ -61,8 +61,10 @@ jobs:
       - name: Etat de controle Telegram (pause / seuil d'edge)
         run: python -m prematch syncctl
 
-      - name: Cycle agent (reglement + apprentissage + alertes)
+      - name: Cycle agent (reglement + apprentissage + telegram)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TZ: Europe/Paris
+          PREMATCH_HEALTH: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python -m prematch cycle

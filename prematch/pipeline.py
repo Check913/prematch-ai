@@ -188,6 +188,11 @@ class Pipeline:
         stamp = str(data.get("at", ""))
         if stamp and stamp <= applied_at:
             return
+        if "local_active" in data:
+            # 1 = le bot local tourne et gere Telegram (les cycles GitHub
+            # s'abstiennent de poller) ; 0/absent = GitHub gere tout.
+            self.db.set_meta("notifications_local",
+                             "1" if data["local_active"] else "0")
         if "paused" in data:
             self.db.set_meta("notifications_paused",
                              "1" if data["paused"] else "0")

@@ -171,8 +171,10 @@ def cmd_bot(args) -> int:
 
 def cmd_cycle(args) -> int:
     """Un cycle unique, pense pour GitHub Actions (toutes les 25 min) :
-    reglement des paris, apprentissage si du, digest si des picks existent,
-    alertes de value forte. N'envoie RIEN si le flux est vide (pas de spam).
+    reglement des paris, apprentissage si du, reponse aux commandes et
+    boutons, digest si l'heure est due, alertes de value forte.
+    Si le bot local est actif (control.json), le telegram est desactive
+    ici pour eviter que deux lecteurs se disputent les messages.
     """
     cfg, pipeline = _pipeline(args)
     from .learning import daily_cycle
@@ -182,6 +184,12 @@ def cmd_cycle(args) -> int:
     except Exception as exc:
         print(f"cycle apprentissage : {exc}")
     sent = "rien"
+    telegram_skipped = str(pipeline.db.get_meta("notifications_local") or "") == "1"
+    if telegram_skipped:
+        print("telegram : gere par le bot local (control.json)")
+        print(json.dumps({k: outcome.get(k) for k in ("settled", "retrained", "promoted")},
+                         default=str))
+        return 0
     try:
         from .telegram_bot import TelegramBot
         bot = TelegramBot(pipeline, load_config(args.config))
@@ -189,11 +197,32 @@ def cmd_cycle(args) -> int:
             "quiet_hours", [1, 7])]
         hour = __import__("time").localtime().tm_hour
         in_quiet = quiet[0] <= hour < quiet[1]
-        # Les digests reguliers viennent du bot local (PC) : ici on ne
-        # fait qu'ALERTER sur value forte, pour eviter les doublons.
-        if not in_quiet:
+        # 1) repondre aux commandes / boutons arrives depuis le cycle precedent
+        bot.poll_once()
+        # 2) digest si l'heure planifiee est due et pas encore envoyee
+        digest_hours = [int(h) for h in cfg.section("telegram").get(
+            "digest_hours", [9, 17])]
+        stamp = __import__("time").strftime("%Y-%m-%d-%H")
+        last_digest = str(pipeline.db.get_meta("last_digest_hour") or "")
+        if int(stamp.split("-")[-1]) in digest_hours and not in_quiet \
+                and stamp != last_digest:
+            n = bot.send_digest()
+            pipeline.db.set_meta("last_digest_hour", stamp)
+            sent = f"digest horaire ({n} message(s))"
+        # 3) alertes de value forte (edge >= 2x le seuil)
+        elif not in_quiet:
             bot.alert_new_value()
             sent = "alertes de value (si edge>=2x le seuil)"
+        # 4) preuve de vie sur declenchement manuel
+        if str(__import__("os").environ.get("PREMATCH_HEALTH", "")) == "1":
+            model = pipeline.db.active_model()
+            bot.client.send(
+                "🔄 Cycle GitHub OK — modèle "
+                f"<code>{model['version'] if model else '?'}</code>, "
+                f"edge {bot.min_edge() * 100:.0f}%, "
+                f"notifications "
+                f"{'en pause' if bot.paused() else 'actives'}.",
+                bot.authorized_chat, keyboard=bot.panel_keyboard())
     except Exception as exc:
         print(f"telegram : {exc}")
     print(f"envoi : {sent}")

@@ -151,19 +151,31 @@ class TelegramBot:
         self.sync_control_state()
 
     def sync_control_state(self) -> None:
-        """Publie l'etat (pause, edge) dans le depot GitHub pour les cycles."""
+        """Publie l'etat (pause, edge, bot local) dans le depot GitHub."""
         import subprocess
+        state = {"paused": self.paused(), "min_edge": self.min_edge(),
+                 "local_active": str(self.pipeline.db.get_meta(
+                     "notifications_local") or "") == "1"}
         try:
             subprocess.Popen(
                 ["python", str(Path(__file__).resolve().parents[1]
                                / "scripts" / "push_control.py"),
-                 json.dumps({"paused": self.paused(),
-                             "min_edge": self.min_edge()},
-                            sort_keys=True)],
+                 json.dumps(state, sort_keys=True)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 cwd=str(Path(__file__).resolve().parents[1]))
         except OSError:
             LOGGER.info("push_control indisponible : etat local uniquement")
+
+    def _publish_local(self, active: bool) -> None:
+        """Declare qui gere Telegram (bot local ou cycles GitHub).
+
+        Un seul lecteur de messages a la fois : quand le bot local tourne,
+        les cycles GitHub n'interrogent plus Telegram (voir cmd_cycle) ;
+        quand il s'arrete, GitHub reprend automatiquement.
+        """
+        self.pipeline.db.set_meta("notifications_local",
+                                  "1" if active else "0")
+        self.sync_control_state()
 
     # -------------------------------------------------------------- envois
     def send_digest(self, title: str | None = None) -> int:
@@ -465,38 +477,43 @@ class TelegramBot:
         last_alert = 0.0
 
         LOGGER.info("bot demarre (digests a %s h)", digest_hours)
-        while not self._stop:
-            now = time.time()
-            local_hour = time.localtime().tm_hour
-            try:
-                # rafraichissement des donnees
-                if now - last_refresh > refresh_minutes * 60:
-                    self.pipeline.refresh_fixtures()
-                    last_refresh = now
+        self._publish_local(True)
+        try:
+            while not self._stop:
+                now = time.time()
+                local_hour = time.localtime().tm_hour
+                try:
+                    # rafraichissement des donnees
+                    if now - last_refresh > refresh_minutes * 60:
+                        self.pipeline.refresh_fixtures()
+                        last_refresh = now
 
-                # digests (respectent la pause et les heures calmes)
-                stamp = time.strftime("%Y-%m-%d-%H")
-                hour = int(stamp.split("-")[-1])
-                if hour in digest_hours and stamp not in sent_on \
-                        and not (quiet[0] <= local_hour < quiet[1]):
-                    self.send_digest()
-                    sent_on.add(stamp)
+                    # digests (respectent la pause et les heures calmes)
+                    stamp = time.strftime("%Y-%m-%d-%H")
+                    hour = int(stamp.split("-")[-1])
+                    if hour in digest_hours and stamp not in sent_on \
+                            and not (quiet[0] <= local_hour < quiet[1]):
+                        self.send_digest()
+                        sent_on.add(stamp)
 
-                # alertes de value (respectent la pause)
-                if now - last_alert > alert_check_minutes * 60:
-                    if not (quiet[0] <= local_hour < quiet[1]):
-                        self.alert_new_value()
-                    last_alert = now
+                    # alertes de value (respectent la pause)
+                    if now - last_alert > alert_check_minutes * 60:
+                        if not (quiet[0] <= local_hour < quiet[1]):
+                            self.alert_new_value()
+                        last_alert = now
 
-                # commandes + boutons
-                self.poll_once()
-            except RuntimeError as exc:
-                LOGGER.warning("telegram : %s", exc)
-                time.sleep(15)
-            except Exception:
-                LOGGER.exception("boucle bot : erreur inattendue")
-                time.sleep(30)
-            time.sleep(check_interval_s)
+                    # commandes + boutons
+                    self.poll_once()
+                except RuntimeError as exc:
+                    LOGGER.warning("telegram : %s", exc)
+                    time.sleep(15)
+                except Exception:
+                    LOGGER.exception("boucle bot : erreur inattendue")
+                    time.sleep(30)
+                time.sleep(check_interval_s)
+        finally:
+            # l'arret du bot local rend Telegram aux cycles GitHub
+            self._publish_local(False)
 
     def stop(self) -> None:
         self._stop = True
