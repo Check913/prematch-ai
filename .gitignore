@@ -7,3 +7,4 @@ __pycache__/
 .venv/
 .pytest_cache/
 reports/backtest_*.csv
+bot_run
