@@ -1,6 +1,6 @@
 {
- "paused": false,
- "min_edge": null,
  "local_active": true,
- "at": "2026-11-11T19:21:34+00:00"
+ "min_edge": 0.03,
+ "paused": false,
+ "at": "2026-11-11T19:23:54+00:00"
 }
