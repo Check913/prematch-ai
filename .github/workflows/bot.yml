@@ -1,0 +1,65 @@
+# Prematch AI - agent 24/7 sur GitHub Actions
+# Toutes les 25 minutes : rafraichit les cotes, calcule les value bets,
+# regle les paris de la veille, envoie le digest Telegram si des picks existent.
+# Secrets requis : TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (repo Settings > Secrets).
+name: prematch-agent
+
+on:
+  schedule:
+    - cron: "*/25 * * * *"   # toutes les 25 min (GitHub peut decaler de qqs min)
+  workflow_dispatch:          # bouton manuel
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prematch-agent
+  cancel-in-progress: false
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dependances
+        run: pip install -r requirements.txt
+
+      - name: Restaurer la base et les modeles (cache 6 h)
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/prematch.db
+            data/models/
+          key: prematch-state-${{ github.run_id }}
+          restore-keys: |
+            prematch-state-
+
+      - name: Historique initial (premiere execution uniquement)
+        run: |
+          python -m prematch ingest-history || echo "ingest history: reessayera"
+
+      - name: Rafraichir les cotes et matchs a venir
+        run: python -m prematch ingest-fixtures
+
+      - name: Entrainement quotidien (0-6 h UTC)
+        run: |
+          H=$(date -u +%H)
+          if [ "$H" -lt 6 ]; then
+            python -m prematch train || echo "train: reessayera"
+          fi
+          # promotion automatique si meilleur
+          python -m prematch status
+
+      - name: Cycle agent (reglement + digest + alertes)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m prematch cycle

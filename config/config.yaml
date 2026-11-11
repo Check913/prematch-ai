@@ -1,0 +1,78 @@
+# Configuration Prematch AI
+# Les secrets vont dans .env (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ODDS_API_KEY)
+
+app:
+  timezone: Europe/Paris
+  data_dir: data
+  log_level: INFO
+  bankroll_eur: 1000        # votre capital de depart
+  kelly_fraction: 0.10      # Kelly fractionne : 10% (backtest 11/2026 :
+                            # drawdown -95% a 25% sans edge -> durci)
+  max_stake_pct: 1.0        # mise max : 1% de bankroll par pari
+  daily_max_exposure_pct: 10.0
+  stop_loss_pct: 8.0        # alerte si la bankroll perd 8% (non-bloquant)
+  min_edge: 0.03            # valeur minimum : 3%
+  max_picks_per_day: 8
+  max_picks_per_match: 1
+  min_price: 1.40
+  max_price: 8.00
+  max_edge: 0.60           # au-dela : artefact du modele, pas de l'argent libre
+  min_model_prob: 0.15
+  min_agreement: 0.55       # les 2 modeles doivent etre d'accord
+  markets: ["1X2", "DC", "OU", "BTTS"]
+
+sources:
+  football_data:
+    enabled: true
+    divisions: [E0, E1, D1, D2, F1, F2, I1, I2, SP1, SP2, N1, B1, P1, T1, SC0]
+    seasons: ["2324", "2425", "2526", "2627"]
+    history_ttl_s: 86400    # l'historique ne change pas : cache 24h
+    fixtures_ttl_s: 900     # les cotes changent : cache 15 min
+  odds_api:
+    enabled: false          # passe a true si vous avez une cle (gratuite)
+    api_key_env: ODDS_API_KEY
+    regions: eu
+    markets: h2h,totals
+    sport_keys: [soccer_epl, soccer_spain_la_liga, soccer_france_ligue_one,
+                 soccer_germany_bundesliga, soccer_italy_serie_a]
+  demo:
+    enabled: false
+
+scraping:
+  min_delay_s: 2.0
+  jitter_s: 1.0
+  max_retries: 3
+  timeout_s: 30
+  respect_robots: true
+  cache_ttl_s: 900
+  max_requests_per_host_per_hour: 240
+
+model:
+  dc_decay_per_day: 0.0018
+  max_goals: 10
+  gbm_estimators: 250
+  gbm_learning_rate: 0.05
+  gbm_max_depth: 3
+  gbm_min_samples_leaf: 25
+  calibrate: true
+  ensemble_weights: {dc: 0.5, gbm: 0.5}
+  devig_method: shin
+
+learning:
+  retrain_hour: 4           # re-entrainement la nuit
+  min_days_between_retrains: 3
+  promo_min_logloss_gain: 0.002
+  holdout_days: 30
+  tune_min_edge_grid: [0.02, 0.03, 0.04, 0.05]
+
+telegram:
+  enabled: true
+  token_env: TELEGRAM_BOT_TOKEN
+  chat_id_env: TELEGRAM_CHAT_ID
+  digest_hours: [9, 17]     # digests a 9h et 17h
+  alert_new_signals: true
+
+scheduler:
+  refresh_minutes: 30       # cotes rafraichies toutes les 30 min
+  settle_minutes: 60        # cycle apprentissage toutes les heures
+  quiet_hours: [1, 7]       # pas d'envoi entre 1h et 7h

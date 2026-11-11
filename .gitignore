@@ -1,0 +1,9 @@
+# Secrets et donnees locaux - ne jamais versionner
+.env
+data/
+*.log
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+reports/backtest_*.csv
