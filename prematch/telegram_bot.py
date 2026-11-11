@@ -161,7 +161,8 @@ class TelegramBot:
                 ["python", str(Path(__file__).resolve().parents[1]
                                / "scripts" / "push_control.py"),
                  json.dumps(state, sort_keys=True)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 cwd=str(Path(__file__).resolve().parents[1]))
         except OSError:
             LOGGER.info("push_control indisponible : etat local uniquement")
